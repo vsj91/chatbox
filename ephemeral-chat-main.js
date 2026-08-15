@@ -1,8 +1,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
 // TODO: replace these with your Supabase project's URL and anon key
-const SUPABASE_URL = 'https://your-project.supabase.co'
-const SUPABASE_KEY = 'public-anon-key'
+const SUPABASE_URL = 'https://tkjzagjernkwgutedcga.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_qH9uhmdaTI2JQxNQ_u8XJA_NofxsxUk'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
