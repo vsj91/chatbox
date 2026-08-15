@@ -21,29 +21,73 @@ let pollHandle = null
 // helper
 const setStatus = (txt) => { connectBtn.textContent = txt }
 
+const searchStatusEl = el('searchStatus'), cancelBtn = el('cancelSearch')
+
+let waitingPoll = null
+
+async function updateWaitingCount(){
+  try {
+    // try lightweight head select to get count
+    const res = await supabase.from('waiting').select('*', { head: true, count: 'exact' })
+    if (res && typeof res.count === 'number'){
+      searchStatusEl.textContent = `In queue: ${res.count} waiting`;
+    } else {
+      // fallback: fetch some rows
+      const { data } = await supabase.from('waiting').select('id').limit(100)
+      searchStatusEl.textContent = `In queue: ${ (data||[]).length } waiting`;
+    }
+  } catch(e){ console.warn('waiting count failed', e); searchStatusEl.textContent = 'Searching...'; }
+}
+
+function stopWaitingPoll(){
+  if (waitingPoll){ clearInterval(waitingPoll); waitingPoll = null }
+  searchStatusEl.textContent = 'Idle'
+  cancelBtn.classList.add('hidden')
+}
+
+cancelBtn.onclick = async () => {
+  try {
+    await supabase.from('waiting').delete().eq('user_id', userId)
+  } catch(e){ console.warn('cancel failed', e) }
+  if (pollHandle){ clearInterval(pollHandle); pollHandle = null }
+  stopWaitingPoll()
+  connectBtn.disabled = false
+  connectBtn.classList.remove('searching')
+  setStatus('Connect & Find a Vibe')
+}
+
 connectBtn.onclick = async () => {
   nickname = nickInput.value.trim() || ('anon-' + userId.slice(0,6))
   connectBtn.disabled = true
   connectBtn.classList.add('searching')
   setStatus('Searching for a vibe... ✨')
+  searchStatusEl.textContent = 'Searching...'
+  cancelBtn.classList.remove('hidden')
 
-  // Attempt atomic match via RPC
-  const { data, error } = await supabase.rpc('match_pair', { p_user_id: userId, p_nickname: nickname })
+  console.log('match_pair: trying to match', userId, nickname)
+  // Attempt atomic match via RPC (swap param order to match deployed function signature)
+  const { data, error } = await supabase.rpc('match_pair', { p_nickname: nickname, p_user_id: userId })
   if (error) {
     console.error('match_pair error', error)
     alert('Error matching: ' + (error.message || 'check console'))
     connectBtn.disabled = false
     setStatus('Connect & Find a Vibe')
+    stopWaitingPoll()
     return
   }
 
   if (data) {
+    console.log('matched immediately', data)
     roomId = data
+    stopWaitingPoll()
     startChat()
     return
   }
 
-  // fallback: poll participants table every 2s to detect room assignment (reliable if realtime not configured)
+  // no immediate match: start updating waiting count and polling for assignment
+  await updateWaitingCount()
+  waitingPoll = setInterval(updateWaitingCount, 2500)
+
   pollHandle = setInterval(async () => {
     try {
       const { data: p } = await supabase.from('participants').select('room_id,nickname').eq('user_id', userId).maybeSingle()
@@ -51,6 +95,8 @@ connectBtn.onclick = async () => {
         roomId = p.room_id
         partnerTag.textContent = 'Partner: ' + (p.nickname || 'mystery')
         clearInterval(pollHandle)
+        if (waitingPoll){ clearInterval(waitingPoll); waitingPoll = null }
+        stopWaitingPoll()
         startChat()
       }
     } catch (e) { console.warn('poll error', e) }
@@ -62,10 +108,13 @@ connectBtn.onclick = async () => {
     ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: `user_id=eq.${userId}` }, payload => {
       const r = payload.new
       if (r?.room_id) {
+        console.log('realtime participant event', r)
         roomId = r.room_id
         partnerTag.textContent = 'Partner: ' + (r.nickname || 'mystery')
         if (pollHandle) { clearInterval(pollHandle); pollHandle = null }
+        if (waitingPoll){ clearInterval(waitingPoll); waitingPoll = null }
         ch.unsubscribe()
+        stopWaitingPoll()
         startChat()
       }
     })
