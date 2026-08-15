@@ -23,7 +23,10 @@
         <div id="searchStatus" class="note" style="flex:1">Idle</div>
         <button id="cancelSearch" class="disconnect hidden">Cancel</button>
       </div>
-      <div class="note">Tips: use emojis to stand out. Connections last until both leave.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+        <div class="note">Tips: use emojis to stand out.</div>
+        <button id="toggleDebug" class="toggle-debug">Show Debug</button>
+      </div>
     </div>
 
     <div id="chat" class="card hidden">
@@ -39,7 +42,12 @@
         <button class="send-btn">Send</button>
       </form>
 
-      <button id="disconnect" class="disconnect">Leave the Vibe</button>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:12px;">
+        <button id="disconnect" class="disconnect">Leave the Vibe</button>
+        <div id="statusSmall" class="status">Connected</div>
+      </div>
+
+      <div id="debug" class="debug hidden"></div>
     </div>
   </main>
   <script type="module" src="ephemeral-chat-main.js"></script>
