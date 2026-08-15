@@ -1,8 +1,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-// TODO: replace these with your Supabase project's URL and anon key
-const SUPABASE_URL = 'https://tkjzagjernkwgutedcga.supabase.co'
-const SUPABASE_KEY = 'sb_publishable_qH9uhmdaTI2JQxNQ_u8XJA_NofxsxUk'
+// Replace these with your Supabase project's URL and anon key (set before deploy)
+const SUPABASE_URL = 'https://your-project.supabase.co'
+const SUPABASE_KEY = 'public-anon-key'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -10,47 +10,75 @@ const el = id => document.getElementById(id)
 const loginEl = el('login'), chatEl = el('chat')
 const nickInput = el('nick'), connectBtn = el('connect')
 const messagesEl = el('messages'), msgForm = el('msgForm'), msgInput = el('msgInput')
-const roomInfo = el('roomInfo'), disconnectBtn = el('disconnect')
+const roomInfo = el('roomInfo'), partnerTag = el('partnerTag'), disconnectBtn = el('disconnect')
 
 let userId = crypto.randomUUID()
 let nickname = null
 let roomId = null
 let messagesSub = null
+let pollHandle = null
+
+// helper
+const setStatus = (txt) => { connectBtn.textContent = txt }
 
 connectBtn.onclick = async () => {
   nickname = nickInput.value.trim() || ('anon-' + userId.slice(0,6))
   connectBtn.disabled = true
-  connectBtn.textContent = 'Searching...'
+  connectBtn.classList.add('searching')
+  setStatus('Searching for a vibe... ✨')
 
-  // Call RPC to atomically match pair or enqueue
+  // Attempt atomic match via RPC
   const { data, error } = await supabase.rpc('match_pair', { p_user_id: userId, p_nickname: nickname })
   if (error) {
-    alert('Error matching: ' + error.message)
+    console.error('match_pair error', error)
+    alert('Error matching: ' + (error.message || 'check console'))
     connectBtn.disabled = false
-    connectBtn.textContent = 'Connect & Find Partner'
+    setStatus('Connect & Find a Vibe')
     return
   }
 
   if (data) {
     roomId = data
     startChat()
-  } else {
-    // no match yet — listen for room creation where we're a participant
-    const channel = supabase.channel('rooms-watch')
-    channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: `user_id=eq.${userId}` }, payload => {
-      roomId = payload.new.room_id
-      channel.unsubscribe()
-      startChat()
-    })
-    await channel.subscribe()
+    return
   }
+
+  // fallback: poll participants table every 2s to detect room assignment (reliable if realtime not configured)
+  pollHandle = setInterval(async () => {
+    try {
+      const { data: p } = await supabase.from('participants').select('room_id,nickname').eq('user_id', userId).maybeSingle()
+      if (p && p.room_id) {
+        roomId = p.room_id
+        partnerTag.textContent = 'Partner: ' + (p.nickname || 'mystery')
+        clearInterval(pollHandle)
+        startChat()
+      }
+    } catch (e) { console.warn('poll error', e) }
+  }, 2000)
+
+  // also subscribe to participants realtime as faster path
+  try {
+    const ch = supabase.channel('p:' + userId)
+    ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: `user_id=eq.${userId}` }, payload => {
+      const r = payload.new
+      if (r?.room_id) {
+        roomId = r.room_id
+        partnerTag.textContent = 'Partner: ' + (r.nickname || 'mystery')
+        if (pollHandle) { clearInterval(pollHandle); pollHandle = null }
+        ch.unsubscribe()
+        startChat()
+      }
+    })
+    await ch.subscribe()
+  } catch (e) { console.warn('realtime subscribe failed', e) }
 }
 
 function formatMsg(m){
-  return `<div class="message"><div class="meta"><strong>${escapeHtml(m.nickname)}</strong> · ${new Date(m.created_at).toLocaleTimeString()}</div><div>${escapeHtml(m.content)}</div></div>`
+  const who = m.user_id === userId ? 'me' : 'other'
+  return `<div class="message ${who}"><div class="meta"><strong>${escapeHtml(m.nickname || (who==='me'? 'You':'Stranger'))}</strong> · ${new Date(m.created_at).toLocaleTimeString()}</div><div>${escapeHtml(m.content)}</div></div>`
 }
 
-function escapeHtml(s){return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+function escapeHtml(s){ if(!s) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }
 
 async function startChat(){
   loginEl.classList.add('hidden')
@@ -58,39 +86,46 @@ async function startChat(){
   roomInfo.textContent = 'Room: ' + roomId
 
   // load recent messages
-  const { data } = await supabase.from('messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true })
-  messagesEl.innerHTML = data.map(formatMsg).join('')
-  messagesEl.scrollTop = messagesEl.scrollHeight
-
-  // subscribe to new messages for this room
-  messagesSub = supabase.channel('messages:' + roomId)
-  messagesSub.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, payload => {
-    messagesEl.insertAdjacentHTML('beforeend', formatMsg(payload.new))
+  try {
+    const { data } = await supabase.from('messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true })
+    messagesEl.innerHTML = (data || []).map(formatMsg).join('')
     messagesEl.scrollTop = messagesEl.scrollHeight
-  })
-  await messagesSub.subscribe()
+  } catch (e) { console.warn('load messages failed', e) }
+
+  // subscribe to new messages for this room (realtime v2 channel)
+  try {
+    messagesSub = supabase.channel('messages:' + roomId)
+    messagesSub.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, payload => {
+      messagesEl.insertAdjacentHTML('beforeend', formatMsg(payload.new))
+      messagesEl.scrollTop = messagesEl.scrollHeight
+    })
+    await messagesSub.subscribe()
+  } catch (e) { console.warn('messages subscribe failed', e) }
+
+  setStatus('Connected')
 }
 
 msgForm.addEventListener('submit', async (e) => {
   e.preventDefault()
   const content = msgInput.value.trim()
   if (!content || !roomId) return
-  await supabase.from('messages').insert({ room_id: roomId, user_id: userId, nickname, content })
-  msgInput.value = ''
+  try {
+    await supabase.from('messages').insert({ room_id: roomId, user_id: userId, nickname, content })
+    msgInput.value = ''
+  } catch (e) { console.warn('send failed', e) }
 })
 
 async function leave(){
   if (!roomId) return location.reload()
-  // remove participant row for this user
-  await supabase.from('participants').delete().eq('user_id', userId)
-  // client tries to delete the room; server trigger will remove messages if no participants remain
-  await supabase.from('rooms').delete().eq('id', roomId)
+  try { await supabase.from('participants').delete().eq('user_id', userId) } catch(e){}
+  try { await supabase.from('rooms').delete().eq('id', roomId) } catch(e){}
+  if (messagesSub) { try { await messagesSub.unsubscribe() } catch(e){} }
   location.reload()
 }
 
 disconnectBtn.onclick = leave
 
-// attempt best-effort cleanup on unload
+// best-effort cleanup
 window.addEventListener('beforeunload', async () => {
   try { await supabase.from('participants').delete().eq('user_id', userId) } catch(e){}
 })

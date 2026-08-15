@@ -3,26 +3,39 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ephemeral Chat</title>
+  <title>VibeChat • Connect Randomly</title>
   <link rel="stylesheet" href="ephemeral-chat-style.css">
 </head>
 <body>
   <main>
-    <h1>Ephemeral 1:1 Chat</h1>
-    <div id="login" class="card">
-      <input id="nick" placeholder="Enter a nickname" />
-      <button id="connect">Connect & Find Partner</button>
-      <p class="note">Chats are ephemeral and deleted when the session ends.</p>
+    <div class="card" id="login">
+      <header>
+        <div class="logo">VC</div>
+        <div>
+          <h1>VibeChat</h1>
+          <div class="note">Random 1:1 chats — ephemeral & playful ✨</div>
+        </div>
+      </header>
+
+      <input id="nick" placeholder="Pick a nickname (e.g. Luna🌙)" />
+      <button id="connect" class="connect-btn">Connect & Find a Vibe</button>
+      <div class="note">Tips: use emojis to stand out. Connections last until both leave.</div>
     </div>
 
     <div id="chat" class="card hidden">
-      <div id="roomInfo"></div>
+      <div class="roomMeta">
+        <div id="roomInfo" class="status">Room: —</div>
+        <div id="partnerTag" class="status">Partner: —</div>
+      </div>
+
       <div id="messages" class="messages"></div>
+
       <form id="msgForm">
-        <input id="msgInput" autocomplete="off" placeholder="Type a message..." />
-        <button>Send</button>
+        <input id="msgInput" autocomplete="off" placeholder="Say hi — be kind 💬" />
+        <button class="send-btn">Send</button>
       </form>
-      <button id="disconnect" class="danger">Leave</button>
+
+      <button id="disconnect" class="disconnect">Leave the Vibe</button>
     </div>
   </main>
   <script type="module" src="ephemeral-chat-main.js"></script>
